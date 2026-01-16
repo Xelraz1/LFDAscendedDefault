@@ -38,6 +38,3 @@ Inside that folder you should have:
 
 ---
 
-## Disclaimer
-This addon is for private servers / custom content and is not affiliated with Blizzard Entertainment.
-
