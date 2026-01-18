@@ -5,8 +5,6 @@
 
 <br><br>
 
-<br><br>
-
 # LFD Ascended Default (3.3.5)
 
 A small World of Warcraft **3.3.5a** addon for Stormforge WoW's custom **Ascended Dungeon** queue option.
