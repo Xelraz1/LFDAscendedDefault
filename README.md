@@ -1,7 +1,7 @@
-<table>
+<table style="border-collapse: collapse; border: none;">
   <tr>
-    <td><img src="https://github.com/user-attachments/assets/34ccdb7c-313a-46a6-a620-2f08f25ba184" width="400"></td>
-    <td><img src="https://github.com/user-attachments/assets/2f6ceb75-80fd-40fb-8101-e169fc0ef1b1" width="400"></td>
+    <td style="border: none;"><img src="https://github.com/user-attachments/assets/34ccdb7c-313a-46a6-a620-2f08f25ba184" width="400"></td>
+    <td style="border: none;"><img src="https://github.com/user-attachments/assets/2f6ceb75-80fd-40fb-8101-e169fc0ef1b1" width="400"></td>
   </tr>
 </table>
 
