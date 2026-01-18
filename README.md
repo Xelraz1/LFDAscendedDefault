@@ -9,7 +9,14 @@ This addon automatically switches the Dungeon Finder (LFD) dropdown to **Random 
 ## Features
 - Automatically selects **Random Ascended Dungeon** on LFD open
 - Prevents the UI/server from snapping back to **Heroic** (only during the first couple seconds after opening)
-- Lets you manually select Heroic later without being forced back
+- Lets you manually select another dungeon option if you do not want to auto select Ascended
+
+---
+
+## Change Default Dungeon
+- Select the "Default" button in the Dungeon Finder menu
+- Select what queue option you want to be defaulted to
+- Save selection
 
 ---
 
@@ -29,12 +36,6 @@ Inside that folder you should have:
 - `LFDAscendedDefault.lua`
 
 5. Launch WoW and enable the addon in the AddOns menu
-
----
-
-## Commands
-- `/lfdasc`  
-  Forces the dropdown to Ascended immediately when the dungeon panel is open (mainly for testing)
 
 ---
 
