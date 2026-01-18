@@ -1,13 +1,56 @@
-local name = UnitName("player")
+--========================================================--
+-- LFDAscended
+-- Automatically selects your preferred LFD queue type
+--========================================================--
+
+local playerName = UnitName("player")
 local _, class = UnitClass("player")
-local c = (RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]) or { r=1, g=1, b=1 }
-local classColor = string.format("|cff%02x%02x%02x", c.r*255, c.g*255, c.b*255)
-local lastOpenTime = 0
+local classColorData = RAID_CLASS_COLORS and RAID_CLASS_COLORS[class] or { r = 1, g = 1, b = 1 }
+local classColor = string.format("|cff%02x%02x%02x", classColorData.r * 255, classColorData.g * 255, classColorData.b * 255)
+
+
+--========================================================--
+-- Constants & Saved Variables
+--========================================================--
+
 local AUTO_WINDOW = 1.0 -- seconds after opening where we "fight" the default
+local lastOpenTime = 0
+local reapplying = false
 
-DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00LFDAscended|r: Loaded. Welcome back "..classColor..name.."|r, enjoy not accidentally queuing heroic!")
+local DEFAULT_OPTIONS = {
+  "Specific Dungeons",
+  "Random Lich King Dungeon",
+  "Random Lich King Heroic",
+  "Random Ascended | Dungeon",
+}
 
+local function EnsureDB()
+  if not LFDAscendedDB then
+    LFDAscendedDB = {}
+  end
 
+  if not LFDAscendedDB.defaultText or LFDAscendedDB.defaultText == "" then
+    local level = UnitLevel("player") or 1
+    -- You can change this logic if you want level-based defaults later
+    if level >= 80 then
+      LFDAscendedDB.defaultText = "Random Ascended | Dungeon"
+    else
+      LFDAscendedDB.defaultText = "Random Ascended | Dungeon"
+    end
+  end
+end
+
+local ADDON_NAME = ...
+local ADDON_VERSION = GetAddOnMetadata(ADDON_NAME, "Version") or "unknown"
+
+DEFAULT_CHAT_FRAME:AddMessage(
+  "|cff00ff00LFDAscended|r: Loaded. Welcome back "
+  .. classColor .. playerName .. "|r, enjoy not accidentally queuing heroic!"
+)
+
+--========================================================--
+-- Utility Helpers
+--========================================================--
 
 local function GetDropdown()
   return _G["LFDQueueFrameTypeDropDown"]
@@ -15,170 +58,360 @@ local function GetDropdown()
       or _G["LFDQueueFrame_TypeDropDown"]
 end
 
-local function ClickAscendedInOpenMenu()
-  -- Dropdown menus usually render into DropDownList1Button1..N
-  for i = 1, 50 do
-    local b = _G["DropDownList1Button"..i]
-    if b and b:IsShown() then
-      local t = _G["DropDownList1Button"..i.."NormalText"]
-      local text = t and t:GetText()
-
-      if type(text) == "string" then
-        local lower = string.lower(text)
-
-        -- Prefer a pure "ascended" option; avoid "random"
-        if string.find(lower, "random", 1, true) and string.find(lower, "ascended", 1, true) then
-          b:Click()
-          CloseDropDownMenus()
-          return true, text
-        end
-      end
-    end
-  end
-  return false, nil
+local function GetLFDParent()
+  return _G["LFDParentFrame"]
+      or _G["LFDFrame"]
+      or _G["LFDQueueFrame"]
 end
 
-local function ForceAscendedOnce()
+local function NormalizeText(s)
+  s = string.lower(s or "")
+  s = s:gsub("|c%x%x%x%x%x%x%x%x", "") -- strip color codes
+  s = s:gsub("|r", "")
+  s = s:gsub("↑", "")
+  s = s:gsub("%s+", " ")
+  s = s:gsub("^%s+", "")
+  s = s:gsub("%s+$", "")
+  return s
+end
+
+local function TableContains(tbl, value)
+  if not tbl then return false end
+  for _, v in ipairs(tbl) do
+    if v == value then
+      return true
+    end
+  end
+  return false
+end
+
+local function WithOpenDropdown(fn)
   local dd = GetDropdown()
-  if not dd then return end
+  if not dd then return nil end
 
-  local name = dd:GetName()
-  local button = name and _G[name.."Button"]
+  local ddName = dd:GetName()
+  local button = ddName and _G[ddName .. "Button"]
 
-  -- Open the dropdown list (so DropDownList buttons exist)
   if button and button.Click then
     button:Click()
   else
-    -- Fallback attempt
     ToggleDropDownMenu(1, nil, dd)
   end
 
-  -- Try to click the Ascended option
-  local ok = ClickAscendedInOpenMenu()
+  local result = fn()
   CloseDropDownMenus()
-  return ok
+  return result
 end
 
-local function ForceSoon()
-  local tries = 0
-  local f = CreateFrame("Frame")
-  f:SetScript("OnUpdate", function(self, elapsed)
-    tries = tries + 1
+local function ForEachDropdownButton(callback)
+  for i = 1, 50 do
+    local b = _G["DropDownList1Button" .. i]
+    local t = _G["DropDownList1Button" .. i .. "NormalText"]
+    local text = t and t:GetText()
 
-    -- Only try while LFD is visible
-    if _G["LFDParentFrame"] and _G["LFDParentFrame"]:IsShown() then
-      if ForceAscendedOnce() then
-        -- If we succeeded, stop early
-        self:SetScript("OnUpdate", nil)
-        self:Hide()
-        return
+    if b and b:IsShown() and type(text) == "string" then
+      callback(b, text)
+    end
+  end
+end
+
+--========================================================--
+-- Dropdown Option Scanning & Selection
+--========================================================--
+
+local function ScanLFDTypeOptions()
+  return WithOpenDropdown(function()
+    local found, seen = {}, {}
+
+    ForEachDropdownButton(function(_, text)
+      local trimmed = text:gsub("^%s+", ""):gsub("%s+$", "")
+      if trimmed ~= "" and not seen[trimmed] then
+        seen[trimmed] = true
+        table.insert(found, trimmed)
       end
-    end
+    end)
 
-    if tries >= 25 then
-      self:SetScript("OnUpdate", nil)
-      self:Hide()
+    if #found > 0 then
+      return found
     end
+    return nil
   end)
 end
 
-local function ForceAfterOpen()
+local function ClickDefaultInOpenMenu()
+  local target = (LFDAscendedDB and LFDAscendedDB.defaultText) or "Random Ascended | Dungeon"
+  local nTarget = NormalizeText(target)
+
+  local matched = nil
+
+  -- Pass 1: exact normalized match
+  ForEachDropdownButton(function(b, text)
+    if not matched and NormalizeText(text) == nTarget then
+      b:Click()
+      matched = text
+    end
+  end)
+
+  if matched then
+    return true, matched
+  end
+
+  -- Pass 2: Ascended fallback (only if target is Ascended)
+  if string.find(nTarget, "ascended", 1, true) then
+    ForEachDropdownButton(function(b, text)
+      if matched then return end
+      local lower = NormalizeText(text)
+      if string.find(lower, "random", 1, true) and string.find(lower, "ascended", 1, true) then
+        b:Click()
+        matched = text
+      end
+    end)
+  end
+
+  if matched then
+    return true, matched
+  end
+
+  return false, nil
+end
+
+local function ForceDefaultOnce()
+  return WithOpenDropdown(function()
+    local ok = ClickDefaultInOpenMenu()
+    return ok
+  end)
+end
+
+--========================================================--
+-- Auto-Reapply Logic After Opening LFD
+--========================================================--
+
+local forceFrame
+local function StartForceAfterOpen()
+  if not forceFrame then
+    forceFrame = CreateFrame("Frame")
+  end
+
   local tries = 0
-  local f = CreateFrame("Frame")
-  f:SetScript("OnUpdate", function(self, elapsed)
+  forceFrame:SetScript("OnUpdate", function(self)
     tries = tries + 1
 
-    -- only run while the panel is open
-    if _G["LFDParentFrame"] and _G["LFDParentFrame"]:IsShown() then
-      if ForceAscendedOnce() then
+    local parent = GetLFDParent()
+    if parent and parent:IsShown() then
+      if ForceDefaultOnce() then
         self:SetScript("OnUpdate", nil)
         self:Hide()
         return
       end
     end
 
-    -- stop after a short burst
     if tries >= 40 then
       self:SetScript("OnUpdate", nil)
       self:Hide()
     end
   end)
+
+  forceFrame:Show()
 end
 
--- Pressing "I" usually calls this
+-- Hook opening via function
 if type(_G["ToggleLFDParentFrame"]) == "function" then
   hooksecurefunc("ToggleLFDParentFrame", function()
     lastOpenTime = GetTime()
-    ForceAfterOpen()
+    StartForceAfterOpen()
   end)
 end
 
--- Backup: also run when the frame shows
-if _G["LFDParentFrame"] then
-  _G["LFDParentFrame"]:HookScript("OnShow", function()
+-- Hook opening via frame OnShow
+local parentFrame = GetLFDParent()
+if parentFrame then
+  parentFrame:HookScript("OnShow", function()
     lastOpenTime = GetTime()
-    ForceAfterOpen()
+    StartForceAfterOpen()
   end)
 end
 
--- Re-apply Ascended if the server UI switches it back to Heroic
-local reapplying = false
-
+-- Prevent heroic/lich king override right after opening
 hooksecurefunc("UIDropDownMenu_SetText", function(frame, text)
   local dd = GetDropdown()
   if frame ~= dd then return end
   if type(text) ~= "string" then return end
 
-  -- Only enrouce right after opening; don't fight manual choices
-  if (GetTime() - lastOpenTime) > AUTO_WINDOW then return end
-
+  if (GetTime() - lastOpenTime) > AUTO_WINDOW then
+    return
+  end
 
   local lower = string.lower(text)
-
-  -- If it ever gets set to a heroic option (and not already ascended), force ascended again.
   if (string.find(lower, "heroic", 1, true) or string.find(lower, "lich king", 1, true))
      and not string.find(lower, "ascended", 1, true) then
 
-    -- prevent infinite recursion
     if reapplying then return end
     reapplying = true
 
-    -- delay a tick so we win whatever code is currently running
     local f = CreateFrame("Frame")
     f:SetScript("OnUpdate", function(self)
       self:SetScript("OnUpdate", nil)
-      ForceAfterOpen()
+      StartForceAfterOpen()
       reapplying = false
     end)
   end
 end)
 
+--========================================================--
+-- Settings UI
+--========================================================--
 
+local LFDAsc_UI
 
-local function HookIt()
-  if _G["LFDParentFrame"] then
-    _G["LFDParentFrame"]:HookScript("OnShow", ForceSoon)
+local function RefreshSettingsDropdown()
+  if not LFDAsc_UI or not LFDAsc_UI._dd then return end
+
+  local f = LFDAsc_UI
+  local dd = f._dd
+  local options = ScanLFDTypeOptions() or DEFAULT_OPTIONS
+
+  UIDropDownMenu_Initialize(dd, function(self, level)
+    for _, optText in ipairs(options) do
+      local info = UIDropDownMenu_CreateInfo()
+      info.text = optText
+      info.func = function()
+        f._selected = optText
+        UIDropDownMenu_SetText(dd, f._selected or options[1])
+      end
+      UIDropDownMenu_AddButton(info, level)
+    end
+  end)
+
+  local chosen = f._selected
+  if not chosen or not TableContains(options, chosen) then
+    chosen = options[#options] or options[1]
+    f._selected = chosen
   end
+
+  UIDropDownMenu_SetText(dd, chosen)
 end
 
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(self, event, addon)
-  if addon == "Blizzard_LFDUI" then
-    HookIt()
+local function CreateSettingsUI()
+  if LFDAsc_UI then return end
+
+  EnsureDB()
+
+  local f = CreateFrame("Frame", "LFDAscendedSettingsFrame", UIParent)
+  f:SetSize(380, 175)
+  f:SetPoint("CENTER")
+  f:SetBackdrop({
+    bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+    edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+    tile = true, tileSize = 32, edgeSize = 32,
+    insets = { left = 8, right = 8, top = 8, bottom = 8 }
+  })
+  f:SetMovable(true)
+  f:EnableMouse(true)
+  f:RegisterForDrag("LeftButton")
+  f:SetScript("OnDragStart", f.StartMoving)
+  f:SetScript("OnDragStop", f.StopMovingOrSizing)
+  f:Hide()
+
+  local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+  title:SetPoint("TOP", 0, -12)
+  title:SetText("LFDAscended Default")
+
+  local label = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  label:SetPoint("TOPLEFT", 18, -46)
+  label:SetWidth(340)
+  label:SetJustifyH("LEFT")
+  label:SetText("Choose your default LFD Type:")
+
+  local dd = CreateFrame("Frame", "LFDAscendedPickerDropDown", f, "UIDropDownMenuTemplate")
+  dd:SetPoint("TOPLEFT", 18, -76)
+  UIDropDownMenu_SetWidth(dd, 185)
+  UIDropDownMenu_JustifyText(dd, "LEFT")
+  f._dd = dd
+
+  local hint = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  hint:SetPoint("BOTTOMLEFT", 18, 44)
+  hint:SetWidth(340)
+  hint:SetJustifyH("LEFT")
+  hint:SetText("This sets what the addon selects when you press I.")
+
+  f._selected = LFDAscendedDB.defaultText
+
+  local saveBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+  saveBtn:SetSize(90, 22)
+  saveBtn:SetPoint("BOTTOMRIGHT", -16, 14)
+  saveBtn:SetText("Save")
+  saveBtn:SetScript("OnClick", function()
+    if f._selected and f._selected ~= "" then
+      LFDAscendedDB.defaultText = f._selected
+      DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00LFDAscended|r: Default set to: " .. f._selected)
+      f:Hide()
+    end
+  end)
+
+  local closeBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+  closeBtn:SetSize(90, 22)
+  closeBtn:SetPoint("BOTTOMRIGHT", -112, 14)
+  closeBtn:SetText("Close")
+  closeBtn:SetScript("OnClick", function() f:Hide() end)
+
+  LFDAsc_UI = f
+  RefreshSettingsDropdown()
+end
+
+local function ShowSettings()
+  EnsureDB()
+  if not LFDAsc_UI then
+    CreateSettingsUI()
+  else
+    RefreshSettingsDropdown()
+  end
+  LFDAsc_UI:Show()
+end
+
+SLASH_LFDASC1 = "/lfdasc"
+SlashCmdList["LFDASC"] = ShowSettings
+
+--========================================================--
+-- Add Settings Button to LFD Frame
+--========================================================--
+
+local function AddSettingsButtonToLFD()
+  local parent = _G["LFDQueueFrame"] or _G["LFDParentFrame"] or _G["LFDFrame"]
+  if not parent then return end
+  if parent.LFDAscendedSettingsButton then return end
+
+  local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+  parent.LFDAscendedSettingsButton = btn
+
+  btn:SetSize(60, 20)
+  btn:SetText("Default")
+
+  local dd = _G["LFDQueueFrameTypeDropDown"]
+  if dd then
+    btn:ClearAllPoints()
+    btn:SetPoint("RIGHT", dd, "LEFT", -40, 2)
+  else
+    btn:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, -48)
+  end
+
+  btn:SetScript("OnClick", ShowSettings)
+end
+
+--========================================================--
+-- Initialization
+--========================================================--
+
+local ev = CreateFrame("Frame")
+ev:RegisterEvent("PLAYER_LOGIN")
+ev:SetScript("OnEvent", function()
+  EnsureDB()
+  AddSettingsButtonToLFD()
+
+  local parent = GetLFDParent()
+  if parent and not parent._LFDAscHooked then
+    parent._LFDAscHooked = true
+    parent:HookScript("OnShow", function()
+      AddSettingsButtonToLFD()
+    end)
   end
 end)
-
-if IsAddOnLoaded("Blizzard_LFDUI") then
-  HookIt()
-end
-
--- Manual test command
-SLASH_LFDASC1 = "/lfdasc"
-SlashCmdList["LFDASC"] = function()
-  if ForceAscendedOnce() then
-    print("LFD: selected Ascended (clicked from dropdown list).")
-  else
-    print("LFD: could not find an Ascended option in the open dropdown list.")
-  end
-end
