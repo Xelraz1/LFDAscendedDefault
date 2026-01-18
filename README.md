@@ -5,6 +5,8 @@ A small World of Warcraft **3.3.5a** addon for Stormforge WoW's custom **Ascende
 This addon automatically switches the Dungeon Finder (LFD) dropdown to **Random Ascended Dungeon** when you press **I**, so you don’t accidentally queue **Random Heroic**.
 
 ---
+<img width="402" height="179" alt="image" src="https://github.com/user-attachments/assets/34ccdb7c-313a-46a6-a620-2f08f25ba184" />
+<img width="444" height="194" alt="image" src="https://github.com/user-attachments/assets/2f6ceb75-80fd-40fb-8101-e169fc0ef1b1" />
 
 ## Features
 - Automatically selects **Random Ascended Dungeon** on LFD open
